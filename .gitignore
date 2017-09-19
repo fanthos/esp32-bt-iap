@@ -1,3 +1,12 @@
+# esp-idf
+/build/
+
+/.settings/
+/.cproject
+/.project
+/sdkconfig
+/sdkconfig.old
+
 # Prerequisites
 *.d
 
@@ -30,3 +39,6 @@
 *.exe
 *.out
 *.app
+
+# IDE
+.vscode

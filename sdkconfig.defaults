@@ -1,0 +1,4 @@
+# Override defaults here
+
+CONFIG_BT_ENABLED=y
+CONFIG_CLASSIC_BT_ENABLED=y

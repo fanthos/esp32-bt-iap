@@ -280,6 +280,7 @@ void renderer_pause()
     if(renderer_status == CS_PAUSED)
         return;
 
+    i2s_stop(renderer_instance->i2s_num);
     renderer_status = CS_PAUSED;
 }
 

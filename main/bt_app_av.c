@@ -119,7 +119,7 @@ static void bt_av_hdl_a2d_evt(uint16_t event, void *p_param)
             renderer_start();
         } else if (ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND == a2d->audio_stat.state){
             play_set_status(PC_STOP);
-            renderer_stop();
+            renderer_pause();
         } else if (ESP_A2D_AUDIO_STATE_STOPPED == a2d->audio_stat.state){
             play_set_status(PC_STOP);
             renderer_stop();

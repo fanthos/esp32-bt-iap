@@ -1,4 +1,3 @@
-#include "driver/uart.h"
 #include "uart_rc.h"
 
 #include "play_ctrl.h"
@@ -14,6 +13,10 @@ const int uart_num = UART_NUM_1;
 
 #define UART_APP_TXD 16
 #define UART_APP_RXD 17
+
+static void uart_app_evt(uint16_t evt, void *param) {
+    //switch(ev)
+}
 
 static void uart_task_handler(void *arg) {
     uart_event_t event;
@@ -108,7 +111,7 @@ void uart_app_start() {
     uart_set_pin(uart_num, UART_APP_TXD, UART_APP_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     //Install UART driver, and get the queue.
     uart_driver_install(uart_num, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart0_queue, 0);
-    xTaskCreate(uart_task_handler, "UartT", 2048, NULL, configMAX_PRIORITIES - 3, &uart_task_handle);
+    xTaskCreate(uart_task_handler, "UartT", 2048, NULL, configMAX_PRIORITIES - 2, &uart_task_handle);
 }
 
 void uart_app_stop() {
@@ -118,9 +121,17 @@ void uart_app_stop() {
     }
 }
 
-void uart_app_write(const uint8_t *buf, uint32_t len) {
+void uart_app_write(const char *buf, uint32_t len) {
     while(len > 0) {
         int ret = uart_write_bytes(uart_num, (const char*)buf, len);
         len -= ret;
+    }
+}
+
+void uart_update_status(uint8_t status) {
+    if(status == PC_PLAY) {
+        uart_app_write(">", 1);
+    } else {
+        uart_app_write("=", 1);
     }
 }

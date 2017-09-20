@@ -102,6 +102,11 @@ static void bt_av_hdl_a2d_evt(uint16_t event, void *p_param)
     case ESP_A2D_CONNECTION_STATE_EVT: {
         a2d = (esp_a2d_cb_param_t *)(p_param);
         ESP_LOGI(BT_AV_TAG, "a2dp conn_state_cb, state %d", a2d->conn_stat.state);
+        if (ESP_A2D_CONNECTION_STATE_CONNECTED == a2d->conn_stat.state) {
+            // renderer_start();
+        } else if (ESP_A2D_CONNECTION_STATE_DISCONNECTED == a2d->conn_stat.state) {
+            renderer_stop();
+        }
         break;
     }
     case ESP_A2D_AUDIO_STATE_EVT: {
@@ -110,7 +115,14 @@ static void bt_av_hdl_a2d_evt(uint16_t event, void *p_param)
         m_audio_state = a2d->audio_stat.state;
         if (ESP_A2D_AUDIO_STATE_STARTED == a2d->audio_stat.state) {
             m_pkt_cnt = 0;
+            play_set_status(PC_PLAY);
             renderer_start();
+        } else if (ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND == a2d->audio_stat.state){
+            play_set_status(PC_STOP);
+            renderer_stop();
+        } else if (ESP_A2D_AUDIO_STATE_STOPPED == a2d->audio_stat.state){
+            play_set_status(PC_STOP);
+            renderer_stop();
         }
         break;
     }
@@ -139,14 +151,18 @@ static void bt_av_hdl_avrc_evt(uint16_t event, void *p_param)
         ESP_LOGI(BT_AV_TAG, "avrc conn_state evt: state %d, feature 0x%x, [%02x:%02x:%02x:%02x:%02x:%02x]",
                            rc->conn_stat.connected, rc->conn_stat.feat_mask, bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
         bt_connected = rc->conn_stat.connected;
+        if(!bt_connected) {
+            play_set_status(PC_STOP);
+        }
         break;
     }
     case ESP_AVRC_CT_PASSTHROUGH_RSP_EVT: {
         ESP_LOGI(BT_AV_TAG, "avrc passthrough rsp: key_code 0x%x, key_state %d", rc->psth_rsp.key_code, rc->psth_rsp.key_state);
         if(rc->psth_rsp.key_state == ESP_AVRC_PT_CMD_STATE_PRESSED) {
             esp_avrc_ct_send_passthrough_cmd(1, rc->psth_rsp.key_code, ESP_AVRC_PT_CMD_STATE_RELEASED);
+            tl_status[1] = 1;
         } else {
-            tl_status[1] = 0;            
+            tl_status[1] = 0;
         }
         break;
     }
@@ -156,7 +172,7 @@ static void bt_av_hdl_avrc_evt(uint16_t event, void *p_param)
     }
 }
 
-void bt_app_rc_ctrl(uint8_t cmd) {
+static void bt_app_rc_ctrl_evt(uint16_t cmd, void *param) {
     if(!bt_connected) return;
     uint8_t key_send = 0;
     switch(cmd) {
@@ -179,8 +195,12 @@ void bt_app_rc_ctrl(uint8_t cmd) {
     if(key_send == 0) {
         return;
     }
-    ESP_LOGI(BT_AV_TAG, "avrc passthrough send: key_code 0x%x, key_state %d", key_send, 1);
+    ESP_LOGI(BT_AV_TAG, "avrc passthrough send: key_code 0x%x, key_state %d", key_send, 0);
     tl_status[1] = 1;
 
     esp_avrc_ct_send_passthrough_cmd(1, key_send, ESP_AVRC_PT_CMD_STATE_PRESSED);
+}
+
+void bt_app_rc_ctrl(uint8_t cmd) {
+    bt_app_work_dispatch(bt_app_rc_ctrl_evt, cmd, NULL, 0, NULL);
 }

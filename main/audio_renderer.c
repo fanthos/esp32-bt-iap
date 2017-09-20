@@ -23,8 +23,10 @@
 
 
 static renderer_config_t *renderer_instance = NULL;
-static component_status_t renderer_status = UNINITIALIZED;
+static component_status_t renderer_status = CS_UNINITIALIZED;
 static QueueHandle_t i2s_event_queue;
+
+static xTaskHandle render_evt_handle = NULL;
 
 extern int taskstatus;
 
@@ -71,7 +73,7 @@ static void init_i2s(renderer_config_t *config)
             .data_in_num = I2S_PIN_NO_CHANGE
     };
 
-    i2s_driver_install(config->i2s_num, &i2s_config, 1, &i2s_event_queue);
+    i2s_driver_install(config->i2s_num, &i2s_config, 10, &i2s_event_queue);
 
     if((mode & I2S_MODE_DAC_BUILT_IN) || (mode & I2S_MODE_PDM))
     {
@@ -83,6 +85,7 @@ static void init_i2s(renderer_config_t *config)
     }
 
     i2s_stop(config->i2s_num);
+    i2s_zero_dma_buffer(config->i2s_num);
 }
 
 /**
@@ -121,7 +124,7 @@ void render_samples(char *buf, uint32_t buf_len, pcm_format_t *buf_desc)
         int bytes_left = buf_len;
         int bytes_written = 0;
         int retry_count = 0;
-        while(bytes_left > 0 && renderer_status != STOPPED) {
+        while(bytes_left > 0 && renderer_status != CS_STOPPED) {
             bytes_written = i2s_write_bytes(renderer_instance->i2s_num, buf, bytes_left, 0);
             bytes_left -= bytes_written;
             buf += bytes_written;
@@ -156,7 +159,7 @@ void render_samples(char *buf, uint32_t buf_len, pcm_format_t *buf_desc)
     int bytes_pushed = 0;
     TickType_t max_wait = 20 / portTICK_PERIOD_MS; // portMAX_DELAY = bad idea
     for (int i = 0; i < num_samples; i++) {
-        if (renderer_status == STOPPED) break;
+        if (renderer_status == CS_STOPPED) break;
 
         if(renderer_instance->output_mode == DAC_BUILT_IN)
         {
@@ -207,15 +210,23 @@ void render_samples(char *buf, uint32_t buf_len, pcm_format_t *buf_desc)
             ptr_l += stride;
         }
     }
+}
 
-    /* takes too long
+static void render_evt_handler() {
     i2s_event_t evt = {0};
-    if(xQueueReceive(i2s_event_queue, &evt, 0)) {
-        if(evt.type == I2S_EVENT_TX_DONE) {
-            ESP_LOGE(TAG, "DMA Buffer Underflow");
+    for(;;) {
+        if(xQueueReceive(i2s_event_queue, &evt, (portTickType)portMAX_DELAY)) {
+            if(evt.type == I2S_EVENT_TX_DONE) {
+                if(renderer_status == CS_STOPPED || renderer_status == CS_PAUSED) {
+                    ESP_LOGE(TAG, "DMA clean");
+                    //i2s_zero_dma_buffer(renderer_instance->i2s_num);
+                } else {
+                    ESP_LOGE(TAG, "DMA Buffer Underflow");
+                }
+            }
         }
+        vTaskDelay(1);
     }
-    */
 }
 
 
@@ -236,37 +247,49 @@ void renderer_init(renderer_config_t *config)
 {
     // update global
     renderer_instance = config;
-    renderer_status = INITIALIZED;
+    renderer_status = CS_INITIALIZED;
 
     ESP_LOGI(TAG, "init I2S mode %d, port %d, %d bit, %d Hz", config->output_mode, config->i2s_num, config->bit_depth, config->sample_rate);
     init_i2s(config);
+    //xTaskCreate(render_evt_handler, "RenderT", 2048, NULL, configMAX_PRIORITIES - 4, &render_evt_handle);
 }
 
 
 void renderer_start()
 {
-    if(renderer_status == RUNNING)
+    if(renderer_status == CS_RUNNING)
         return;
 
-    renderer_status = RUNNING;
+    renderer_status = CS_RUNNING;
     i2s_start(renderer_instance->i2s_num);
-
-    // buffer might contain noise
-    i2s_zero_dma_buffer(renderer_instance->i2s_num);
 }
 
 void renderer_stop()
 {
-    if(renderer_status == STOPPED)
+    if(renderer_status == CS_STOPPED)
         return;
 
-    renderer_status = STOPPED;
+    renderer_status = CS_STOPPED;
     i2s_stop(renderer_instance->i2s_num);
+    // buffer might contain noise
+    i2s_zero_dma_buffer(renderer_instance->i2s_num);
+}
+
+void renderer_pause()
+{
+    if(renderer_status == CS_PAUSED)
+        return;
+
+    renderer_status = CS_PAUSED;
 }
 
 void renderer_destroy()
 {
-    renderer_status = UNINITIALIZED;
+    renderer_status = CS_UNINITIALIZED;
     i2s_driver_uninstall(renderer_instance->i2s_num);
+    if(render_evt_handle != NULL) {
+        vTaskDelete(render_evt_handle);
+        render_evt_handle = NULL;
+    }
 }
 

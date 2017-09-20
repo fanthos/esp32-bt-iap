@@ -12,6 +12,8 @@ enum PLAY_CONTROL{
 };
 
 void play_control(uint8_t ctrl);
+void play_set_status(uint8_t status);
+
 uint8_t play_status();
 
 #endif

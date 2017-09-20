@@ -57,6 +57,7 @@ void render_samples(char *buf, uint32_t len, pcm_format_t *format);
 void renderer_init(renderer_config_t *config);
 void renderer_start();
 void renderer_stop();
+void renderer_pause();
 void renderer_destroy();
 
 void renderer_zero_dma_buffer();

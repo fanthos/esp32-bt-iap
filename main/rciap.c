@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 
 #include "rciap.h"
 #include "uart_rc.h"
@@ -12,10 +13,10 @@ uint8_t playstatus = 0;
 
 uint16_t STATUS_PUSH = 0x0001;
 
-uint32_t IAP_BAUDRATE = 19200;
-uint32_t IAP_BYTEPS = IAP_BAUDRATE / 10;
-uint32_t IAP_MAXWAIT = 256L * 1000L / IAP_BYTEPS + 1;
-uint32_t IAP_MILLISBUF = 1;
+#define IAP_BAUDRATE 19200
+#define IAP_BYTEPS IAP_BAUDRATE / 10
+#define IAP_MAXWAIT 256L * 1000L / IAP_BYTEPS + 1
+#define IAP_MILLISBUF 1
 
 const unsigned char CTRLPIN_PLAY = 2;
 const unsigned char CTRLPIN_NEXT = 3;
@@ -36,7 +37,7 @@ static inline uint8_t getstatus(uint8_t flag) {
 static inline void mydelay(const uint32_t t) {
 	//SerialDbg.print("mydelay: ");
 	//SerialDbg.println(t);
-	delay(t);
+	// delay(t);
 }
 
 static inline uint32_t uc2ul(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
@@ -73,7 +74,7 @@ static void serialwrite(iap_buffer_t *buffer, const uint8_t buf[], const uint16_
 	uint32_t t;
 	uint32_t sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
 	procunkcmd(buffer, len - 2, buf + 2, "send: ");
-	newsent = millis();
+	newsent = xTaskGetTickCount() * 10;
 	if(lastsent > newsent) {
 		t = lastsent - newsent;
 		if(t > IAP_MAXWAIT) {
@@ -87,14 +88,14 @@ static void serialwrite(iap_buffer_t *buffer, const uint8_t buf[], const uint16_
 		}
 	}
 	lastsent = newsent + sendtime;
-	buffer->callback(buffer->callback_param, buf, len);
+	buffer->callback(buffer->param_callback, (const char *)buf, len);
 }
 
 static void processsendbuf(iap_buffer_t *buffer) {
 	if(buffer->ready == 0)return;
 	buffer->data[2] = (uint8_t)buffer->len;
-	buffer->data[buffer->len + 3] = calcsum((uint8_t*)buffer->data + 2, buffer->data + 1);
-	serialwrite((uint8_t *)buffer->data, buffer->len + 4);
+	buffer->data[buffer->len + 3] = calcsum((uint8_t*)buffer->data + 2, buffer->len + 1);
+	serialwrite(buffer, (uint8_t *)buffer->data, buffer->len + 4);
 	buffer->ready = 0;
 }
 
@@ -172,7 +173,7 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 				sendbuf[3] = 0x13;
 				buffer->len = headersize + 2;
 				buffer->ready = 1;
-				processsendbuf();
+				processsendbuf(buffer);
 				memcpy((void*)sendbuf, R(_buf0013), RL(_buf0013));
 				buffer->len = headersize + 1;
 				buffer->ready = 1;
@@ -190,7 +191,7 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 				rbuf[1] = recv[1];
 				sendbuf[1] = 2;
 				buffer->len = headersize + 2;
-				procunkcmd(len, recv, "!!!Unk: ");
+				procunkcmd(buffer, len, recv, "!!!Unk: ");
 				break;
 		}
 	} else if (recv[0] == 4 && recv[1] == 0 && len > 2) {
@@ -284,27 +285,33 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 			case 0x29: // Play control
 				switch(recv[3]) {
 					case 0x01:
+						action = PC_TOGGLE;
+						break;
 					case 0x02:
+						action = PC_STOP;
+						break;
 					case 0x0A:
+						action = PC_PLAY;
+						break;
 					case 0x0B:
-						action = PLAY;
+						action = PC_PAUSE;
 						break;
 					case 0x03:
 					case 0x08:
 					case 0x0C:
-						action = NEXT;
+						action = PC_NEXT;
 						break;
 					case 0x04:
 					case 0x09:
 					case 0x0D:
-						action = PREV;
+						action = PC_PREV;
 						break;
 					default:
-						action = NONE;
+						action = PC_NONE;
 						break;
 				}
-				if(action) {
-					playctrl(action);
+				if(action != PC_NONE) {
+					play_control(action);
 				}
 				buffer->len = headersize;
 				WRITERET(R(_04ack),rbuf, buffer->len);
@@ -312,7 +319,7 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 				sendbuf[2] = 1;
 				buffer->ready = 1;
 
-				processsendbuf();
+				processsendbuf(buffer);
 				sendbuf[2] = 0x27;
 				buffer->len = headersize;
 				WRITERET(R(_d0027),rbuf, buffer->len);
@@ -322,24 +329,24 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 			case 0x37: // Set play track
 				switch(recv[6]) {
 					case 0:
-						action = PREV;
+						action = PC_PREV;
 						break;
 					case 2:
-						action = NEXT;
+						action = PC_NEXT;
 						break;
 					default:
-						action = NONE;
+						action = PC_NONE;
 						break;
 				}
-				if(action) {
-					playctrl(action);
+				if(action != PC_NONE) {
+					play_control(action);
 				}
 				buffer->len = headersize;
 				WRITERET(R(_04ack),rbuf, buffer->len);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
 				buffer->ready = 1;
-				processsendbuf();
+				processsendbuf(buffer);
 
 				sendbuf[2] = 0x27;
 				buffer->len = headersize;
@@ -351,11 +358,11 @@ static uint16_t doreply(iap_buffer_t *buffer, const uint16_t len, const uint8_t 
 				WRITERET(R(_04ackunk),rbuf, buffer->len);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
-				procunkcmd(len, recv, "!!!Unk: ");
+				procunkcmd(buffer, len, recv, "!!!Unk: ");
 				break;
 		}
 	} else {
-		procunkcmd(len, recv, "!!!Unk: ");
+		procunkcmd(buffer, len, recv, "!!!Unk: ");
 		return 0;
 	}
 
@@ -372,14 +379,14 @@ void processserial(iap_buffer_t *buffer, const uint8_t input1) {
 	static uint16_t pos = 0;
 	static uint16_t len = 0;
 	static uint8_t sum = 0;;
-	static uint32_t lasttime = -1;
+	// static uint32_t lasttime = -1;
 
-	uint32_t newtime;
-	newtime = millis();
-	if(newtime - lasttime > 100) {
-		//status = -1;
-	}
-	lasttime = newtime;
+	// uint32_t newtime;
+	// newtime = xTaskGetTickCount() * 10;
+	// if(newtime - lasttime > 100) {
+	// 	//status = -1;
+	// }
+	// lasttime = newtime;
 	if(status == -1) {
 		status = 0;
 		pos = 0;
@@ -422,17 +429,17 @@ void iap_handler(void *param) {
 	uint32_t lastrun = 0;
 	// uint32_t newrun = millis();
 	iap_buffer_t *buffer = (iap_buffer_t *)param;
-	memset(buffer->data, 0, sizeof(iap_buffer_t.data));
+	memset(buffer->data, 0, sizeof(((iap_buffer_t*)0)->data));
 	buffer->data[0] = 0xff;
 	buffer->data[1] = 0x55;
 	buffer->len = 0;
 	buffer->ready = 0;
 	for(;;) {
-		if(newrun - lastrun > 50) {
-			//SerialDbg.print("Lagging: ");
-			//SerialDbg.println(newrun - lastrun);
-		}
-		lastrun = newrun;
+		// if(newrun - lastrun > 50) {
+		// 	//SerialDbg.print("Lagging: ");
+		// 	//SerialDbg.println(newrun - lastrun);
+		// }
+		// lastrun = newrun;
 		if(buffer->ready) {
 			processsendbuf(buffer);
 		} else {

@@ -3,6 +3,7 @@
 #include "play_ctrl.h"
 
 #include "esp_log.h"
+#include "rciap.h"
 
 #define TAG "UART_RC"
 
@@ -22,7 +23,22 @@ static void uart_task_handler(void *arg) {
     uart_event_t event;
     size_t buffered_size;
     uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
-    for(;;) {
+	uint32_t lastrun = 0;
+	// uint32_t newrun = millis();
+	// iap_buffer_t *buffer = (iap_buffer_t *)param;
+	// memset(buffer->data, 0, sizeof(((iap_buffer_t*)0)->data));
+	uint8_t _recvbuf[258];
+	uint8_t *recvbuf = _recvbuf +1;
+	uint8_t recvstatus = 0;
+	uint16_t recvpos = 0;
+	uint16_t recvlen = 0;
+	uint8_t recvsum = 0;;
+	for(;;) {
+		// if(newrun - lastrun > 50) {
+		// 	//SerialDbg.print("Lagging: ");
+		// 	//SerialDbg.println(newrun - lastrun);
+		// }
+		// lastrun = newrun;
         //Waiting for UART event.
         if(xQueueReceive(uart0_queue, (void * )&event, (portTickType)portMAX_DELAY)) {
             ESP_LOGI(TAG, "uart[%d] event:", uart_num);
@@ -33,21 +49,42 @@ static void uart_task_handler(void *arg) {
                 be full.
                 in this example, we don't process data in event, but read data outside.*/
                 case UART_DATA: {
-                    uart_get_buffered_data_len(uart_num, &buffered_size);
-                    ESP_LOGI(TAG, "data, len: %d; buffered len: %d", event.size, buffered_size);
                     int len = uart_read_bytes(uart_num, data, BUF_SIZE, 100 / portTICK_RATE_MS);
-
                     for(int i = 0; i < len; i++) {
-                        uart_write_bytes(uart_num, (const char*)data + i, 1);
-                        if(data[i] == 'n') {
-                            play_control(PC_NEXT);
-                        } else if(data[i] == 'p') {
-                            play_control(PC_PREV);
-                        } else if(data[i] == ' ') {
-                            if(play_status()) {
-                                play_control(PC_PAUSE);
+                        int input1 = data[i];
+                        if(input1 != -1) {
+                            if(recvstatus == -1) {
+                                recvstatus = 0;
+                                recvpos = 0;
+                                recvlen = 0;
+                                recvsum = 0;
+                            }
+                            if(input1 == 0xff && recvstatus == 0) {
+                                recvstatus = 1;
+                            } else if(input1 == 0x55 && recvstatus == 1) {
+                                recvstatus = 2;
+                            } else if(recvstatus == 2) {
+                                recvlen = input1;
+                                recvsum = input1;
+                                recvstatus = 3;
+                            } else if(recvstatus == 3) {
+                                if(recvpos < len){
+                                    recvbuf[recvpos] = input1;
+                                    recvsum += input1;
+                                    recvpos++;
+                                } else {
+                                    recvstatus = 4;
+                                    _recvbuf[0] = len;
+                                    recvbuf[len] = input1;
+                                    // procunkcmd(buffer, len + 2, _recvbuf, "recv: ");
+                                    recvsum += input1;
+                                    if(recvsum == 0) {
+                                        iap_proc_msg(recvbuf, recvlen, NULL, NULL);
+                                    }
+                                    recvstatus = -1;
+                                }
                             } else {
-                                play_control(PC_PLAY);
+                                recvstatus = -1;
                             }
                         }
                     }

@@ -18,24 +18,52 @@ uint16_t STATUS_PUSH = 0x0001;
 #define IAP_MAXWAIT 256L * 1000L / IAP_BYTEPS + 1
 #define IAP_MILLISBUF 1
 
-static inline uint32_t uc2ul(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-	uint32_t t = a;
-	t = t << 8 | b;
-	t = t << 8 | c;
-	t = t << 8 | d;
-	return t;
+enum {
+	SCM_BASIC = 0x0001,
+	SCM_EXT = 0x0002,
+	SCM_TRACK_INDEX = 0x0004,
+	SCM_TRACK_INDEX_MS = 0x0008,
+	SCM_TRACK_INDEX_S = 0x0010,
+	SCM_CHAPTER_INDEX = 0x0020,
+	SCM_CHAPTER_INDEX_MS = 0x0040,
+	SCM_CHAPTER_INDEX_S = 0x0080,
+	SCM_TRACK_UID = 0x0100,
+	SCM_TRACK_TYPE = 0x0200,
+	SCM_TRACK_LYRIC = 0x0400
+};
+
+enum {
+	SCI_STOP = 0x00,
+	SCI_FFW = 0x02,
+	SCI_REW = 0x03,
+	SCI_EXT = 0x06,
+	SCI_TRACK_INDEX = 0x01,
+	SCI_TRACK_INDEX_MS = 0x04,
+	SCI_TRACK_INDEX_S = 0x07,
+	SCI_CHAPTER_INDEX = 0x05,
+	SCI_CHAPTER_INDEX_MS = 0x08,
+	SCI_CHAPTER_INDEX_S = 0x09,
+	SCI_TRACK_UID = 0x0a,
+	SCI_TRACK_TYPE = 0x0b,
+	SCI_TRACK_LYRIC = 0x0c
+};
+
+static uint32_t iap_event_mask = 0;
+
+static inline uint32_t uc2ul(const char * a) {
+	return (*a << 24) | (*(a + 1) << 16) | (*(a + 2) << 8) | *(a + 3);
 }
 
-static inline void ul2uc(uint32_t a, uint8_t *buf) {
+static inline void ul2uc(uint32_t a, char *buf) {
 	buf[0] = (a >> 24) & 0xff;
 	buf[1] = (a >> 16) & 0xff;
 	buf[2] = (a >> 8) & 0xff;
 	buf[3] = a & 0xff;
 }
 
-static void calcsum(uint8_t * const buf, uint16_t len) {
+static void calcsum(char * const buf, uint16_t len) {
 	uint8_t sum = 0;
-	const uint8_t *buf1 = buf + len + 2;
+	const char *buf1 = buf + len + 2;
 	buf[2] = (uint8_t)len;
 	while(buf1 >= buf + 2) {
 		sum -= *buf1;
@@ -45,7 +73,7 @@ static void calcsum(uint8_t * const buf, uint16_t len) {
 }
 
 static void procunkcmd(const uint16_t len,
-		const uint8_t *const recv, const char lbl[]) {
+		const char *const recv, const char lbl[]) {
 	//SerialDbg.print(lbl);
 	for(uint16_t _i = 0; _i < len; _i++){
 		//SerialDbg.print(recv[_i], HEX);
@@ -54,9 +82,46 @@ static void procunkcmd(const uint16_t len,
 	//SerialDbg.println("");
 }
 
-uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
+void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
+	char sendbuf[20] = {0xff, 0x55, 0x04, 0x00, 0x27};
+	if (status == PC_SEEK) {
+		if (iap_event_mask | SCM_TRACK_INDEX_MS) {
+			uint32_t playtime = play_get_time();
+			sendbuf[5] = SCI_TRACK_INDEX_MS;
+			ul2uc(playtime, sendbuf + 6);
+			calcsum(sendbuf, 8);
+			cb(sendbuf, 12, cb_param);
+			return;
+		} else if (iap_event_mask | SCM_TRACK_INDEX_S) {
+			uint32_t playtime = play_get_time() / 1000;
+			sendbuf[5] = SCI_TRACK_INDEX_MS;
+			ul2uc(playtime, sendbuf + 6);
+			calcsum(sendbuf, 8);
+			cb(sendbuf, 12, cb_param);
+			return;
+		}
+	} else if (iap_event_mask | SCM_EXT) {
+		sendbuf[5] = SCI_EXT;
+		switch (status) {
+		case PC_PLAY:
+			sendbuf[6] = 0x0a;
+			break;
+		case PC_STOP:
+			sendbuf[6] = 0x02;
+			break;
+		case PC_PAUSE:
+			sendbuf[6] = 0x0b;
+			break;
+		}
+		calcsum(sendbuf, 5);
+		cb(sendbuf, 9, cb_param);
+		return;
+	}
+}
+
+uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
 		iap_callback_t cb, void *cb_param) {
-	const uint8_t
+	const char
 		//retdata00ack[] = {0,0},
 		retdata_0007[] = "MYBT1",
 		retdata_0009[] = {8,1,1},
@@ -72,17 +137,17 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 		retdata_02[] = {0,0,0,2},
 		retdata_03[] = {0,0,0,3},
 		retdata_0101[] = {0,0,0,1,0,0,0,1},
-		retdata_041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
-	const uint8_t retdata_ary0028[] = {1,4,4,4,5,6,7};
-	const uint8_t retdata_buf0013[] = {0x00, 0x27, 0x00};
-	const uint8_t retdata_d0027[] = {1, 0, 0, 0, 1};
+		retdata_041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1},
+		retdata_ary0028[] = {1,4,4,4,5,6,7},
+		retdata_buf0013[] = {0x00, 0x27, 0x00},
+		retdata_d0027[] = {1, 0, 0, 0, 1};
 	uint16_t retlen;
 	uint8_t len;
-	uint8_t data[140] = {0xff, 0x55};
-	uint8_t * const sendbuf = data + 3;
+	char data[140] = {0xff, 0x55};
+	char * const sendbuf = data + 3;
 
 	if(recv[0] == 0 && datalen > 1) {
-		uint8_t *rbuf = sendbuf + 2;
+		char *rbuf = sendbuf + 2;
 		sendbuf[0] = 0;
 		sendbuf[1] = recv[1] + 1;
 		len = 0;
@@ -131,12 +196,15 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				sendbuf[3] = 0x13;
 				len = headersize + 2;
 				calcsum(data, len);
-				cb(data, len, cb_param);
-				memcpy((void*)sendbuf, R(_buf0013), RL(_buf0013));
+				cb(data, len + 2, cb_param);
+
+				sendbuf[0] = 0;
+				sendbuf[1] = 0x27;
+				sendbuf[2] = 0;
 				len = headersize + 1;
 				break;
 			case 0x28: // Device RetAccessoryInfo
-				rbuf[0] = R(_ary0028)[recv[2]];
+				rbuf[0] = R(_ary0028)[(unsigned char)recv[2]];
 				if(rbuf[0] > RL(_ary0028)){
 					return 0;
 				}
@@ -152,7 +220,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				break;
 		}
 	} else if (recv[0] == 4 && recv[1] == 0 && datalen > 2) {
-		uint8_t *rbuf = sendbuf + 3;
+		char *rbuf = sendbuf + 3;
 		sendbuf[0] = 4;
 		sendbuf[1] = 0;
 		sendbuf[2] = recv[2] + 1;
@@ -163,7 +231,6 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 			case 0x0B: // Set audiobook speed
 			case 0x16: // Rest db selection
 			case 0x17: // Select db record
-			case 0x26: // Set PlayStatusChange notification
 			case 0x28: // Play Current Selection
 			case 0x2E: // Set Shuffle
 			case 0x31: // Set Repeat
@@ -213,12 +280,12 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 			case 0x1A: // Retrieve categorized db records
 				{
 					uint32_t id_s, id_e;
-					id_e = uc2ul(recv[7], recv[8], recv[9], recv[10]);
+					id_e = uc2ul(recv + 7);
 					if(id_e == 0xffffffff) {
 						id_s = 0;
 						id_e = 4;
 					} else {
-						id_s = uc2ul(recv[3], recv[4], recv[5], recv[6]);
+						id_s = uc2ul(recv + 3);
 						id_e = id_s + id_e;
 						if(id_s > 3)id_s = 3;
 						if(id_e > 4)id_e = 4;
@@ -236,6 +303,16 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 						id_s ++;
 					}
 					return 0;
+				}
+			case 0x26: // Set PlayStatusChange notification
+				if(datalen < 4) {
+					if(recv[3] == 0) {
+						iap_event_mask = 0x0000;
+					} else {
+						iap_event_mask = 0x002d;
+					}
+				} else {
+					iap_event_mask = uc2ul(recv + 3);
 				}
 			case 0x29: // Play control
 				switch(recv[3]) {

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 enum PLAY_CONTROL{
+    PC_SEEK = 0x7f,
     PC_NONE = 0,
     PC_STOP = 1,
     PC_PLAY,
@@ -17,5 +18,6 @@ void play_control(uint8_t ctrl);
 void play_set_status(uint8_t status);
 
 uint8_t play_status();
+uint32_t play_get_time();
 
 #endif

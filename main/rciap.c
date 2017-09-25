@@ -50,20 +50,20 @@ enum {
 
 static uint32_t iap_event_mask = 0;
 
-static inline uint32_t uc2ul(const char * a) {
+static inline uint32_t uc2ul(const uint8_t * a) {
 	return (*a << 24) | (*(a + 1) << 16) | (*(a + 2) << 8) | *(a + 3);
 }
 
-static inline void ul2uc(uint32_t a, char *buf) {
+static inline void ul2uc(uint32_t a, uint8_t *buf) {
 	buf[0] = (a >> 24) & 0xff;
 	buf[1] = (a >> 16) & 0xff;
 	buf[2] = (a >> 8) & 0xff;
 	buf[3] = a & 0xff;
 }
 
-static void calcsum(char * const buf, uint16_t len) {
+static void calcsum(uint8_t * const buf, uint16_t len) {
 	uint8_t sum = 0;
-	const char *buf1 = buf + len + 2;
+	const uint8_t *buf1 = buf + len + 2;
 	buf[2] = (uint8_t)len;
 	while(buf1 >= buf + 2) {
 		sum -= *buf1;
@@ -73,7 +73,7 @@ static void calcsum(char * const buf, uint16_t len) {
 }
 
 static void procunkcmd(const uint16_t len,
-		const char *const recv, const char lbl[]) {
+		const uint8_t *const recv, const uint8_t lbl[]) {
 	//SerialDbg.print(lbl);
 	for(uint16_t _i = 0; _i < len; _i++){
 		//SerialDbg.print(recv[_i], HEX);
@@ -83,34 +83,34 @@ static void procunkcmd(const uint16_t len,
 }
 
 void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
-	char sendbuf[20] = {0xff, 0x55, 0x04, 0x00, 0x27};
+	uint8_t sendbuf[20] = {0xff, 0x55, 0x00, 0x04, 0x00, 0x27};
 	if (status == PC_SEEK) {
 		if (iap_event_mask | SCM_TRACK_INDEX_MS) {
 			uint32_t playtime = play_get_time();
-			sendbuf[5] = SCI_TRACK_INDEX_MS;
-			ul2uc(playtime, sendbuf + 6);
+			sendbuf[6] = SCI_TRACK_INDEX_MS;
+			ul2uc(playtime, sendbuf + 7);
 			calcsum(sendbuf, 8);
 			cb(sendbuf, 12, cb_param);
 			return;
 		} else if (iap_event_mask | SCM_TRACK_INDEX_S) {
 			uint32_t playtime = play_get_time() / 1000;
-			sendbuf[5] = SCI_TRACK_INDEX_MS;
-			ul2uc(playtime, sendbuf + 6);
+			sendbuf[6] = SCI_TRACK_INDEX_MS;
+			ul2uc(playtime, sendbuf + 7);
 			calcsum(sendbuf, 8);
 			cb(sendbuf, 12, cb_param);
 			return;
 		}
 	} else if (iap_event_mask | SCM_EXT) {
-		sendbuf[5] = SCI_EXT;
+		sendbuf[6] = SCI_EXT;
 		switch (status) {
 		case PC_PLAY:
-			sendbuf[6] = 0x0a;
+			sendbuf[7] = 0x0a;
 			break;
 		case PC_STOP:
-			sendbuf[6] = 0x02;
+			sendbuf[7] = 0x02;
 			break;
 		case PC_PAUSE:
-			sendbuf[6] = 0x0b;
+			sendbuf[7] = 0x0b;
 			break;
 		}
 		calcsum(sendbuf, 5);
@@ -119,9 +119,9 @@ void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
 	}
 }
 
-uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
+uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 		iap_callback_t cb, void *cb_param) {
-	const char
+	const uint8_t
 		//retdata00ack[] = {0,0},
 		retdata_0007[] = "MYBT1",
 		retdata_0009[] = {8,1,1},
@@ -143,11 +143,11 @@ uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
 		retdata_d0027[] = {1, 0, 0, 0, 1};
 	uint16_t retlen;
 	uint8_t len;
-	char data[140] = {0xff, 0x55};
-	char * const sendbuf = data + 3;
+	uint8_t data[140] = {0xff, 0x55};
+	uint8_t * const sendbuf = data + 3;
 
 	if(recv[0] == 0 && datalen > 1) {
-		char *rbuf = sendbuf + 2;
+		uint8_t *rbuf = sendbuf + 2;
 		sendbuf[0] = 0;
 		sendbuf[1] = recv[1] + 1;
 		len = 0;
@@ -204,7 +204,7 @@ uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
 				len = headersize + 1;
 				break;
 			case 0x28: // Device RetAccessoryInfo
-				rbuf[0] = R(_ary0028)[(unsigned char)recv[2]];
+				rbuf[0] = R(_ary0028)[recv[2]];
 				if(rbuf[0] > RL(_ary0028)){
 					return 0;
 				}
@@ -216,11 +216,11 @@ uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
 				rbuf[1] = recv[1];
 				sendbuf[1] = 2;
 				len = headersize + 2;
-				procunkcmd(datalen, recv, "!!!Unk: ");
+				procunkcmd(datalen, recv, (uint8_t*)"!!!Unk: ");
 				break;
 		}
 	} else if (recv[0] == 4 && recv[1] == 0 && datalen > 2) {
-		char *rbuf = sendbuf + 3;
+		uint8_t *rbuf = sendbuf + 3;
 		sendbuf[0] = 4;
 		sendbuf[1] = 0;
 		sendbuf[2] = recv[2] + 1;
@@ -389,11 +389,11 @@ uint16_t iap_proc_msg(const char recv[], const uint16_t datalen,
 				WRITERET(R(_04ackunk),rbuf, len);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
-				procunkcmd(datalen, recv, "!!!Unk: ");
+				procunkcmd(datalen, recv, (uint8_t*)"!!!Unk: ");
 				break;
 		}
 	} else {
-		procunkcmd(datalen, recv, "!!!Unk: ");
+		procunkcmd(datalen, recv, (uint8_t*)"!!!Unk: ");
 		return 0;
 	}
 

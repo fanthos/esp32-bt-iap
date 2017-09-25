@@ -21,7 +21,7 @@ static void uart_app_evt(uint16_t evt, void *param) {
     //switch(ev)
 }
 
-int uart_app_cb_write(const char *data, const int32_t len, void *params) {
+int uart_app_cb_write(const uint8_t *data, const int32_t len, void *params) {
     uart_app_write(data, len);
     return 0;
 }
@@ -29,13 +29,13 @@ int uart_app_cb_write(const char *data, const int32_t len, void *params) {
 static void uart_task_handler(void *arg) {
     uart_event_t event;
     size_t buffered_size;
-    char* data = (char*) malloc(BUF_SIZE);
+    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
 	uint32_t lastrun = 0;
 	// uint32_t newrun = millis();
 	// iap_buffer_t *buffer = (iap_buffer_t *)param;
 	// memset(buffer->data, 0, sizeof(((iap_buffer_t*)0)->data));
-	char _recvbuf[258];
-	char *recvbuf = _recvbuf +1;
+	uint8_t _recvbuf[258];
+	uint8_t *recvbuf = _recvbuf +1;
 	int8_t recvstatus = 0;
 	uint16_t recvpos = 0;
 	uint16_t recvlen = 0;
@@ -57,42 +57,46 @@ static void uart_task_handler(void *arg) {
                 in this example, we don't process data in event, but read data outside.*/
                 case UART_DATA: {
                     int len = uart_read_bytes(uart_num, (uint8_t *)data, BUF_SIZE, 100 / portTICK_RATE_MS);
+                    ESP_LOGI(TAG, "recv: %d, msgsize: %d", len, event.size);
+                    // ESP_LOG_BUFFER_HEX(TAG, data, len);// ESP_LOG_INFO
                     for(int i = 0; i < len; i++) {
-                        int input1 = data[i];
-                        if(input1 != -1) {
-                            if(recvstatus == -1) {
-                                recvstatus = 0;
-                                recvpos = 0;
-                                recvlen = 0;
-                                recvsum = 0;
-                            }
-                            if(input1 == 0xff && recvstatus == 0) {
-                                recvstatus = 1;
-                            } else if(input1 == 0x55 && recvstatus == 1) {
-                                recvstatus = 2;
-                            } else if(recvstatus == 2) {
-                                recvlen = input1;
-                                recvsum = input1;
-                                recvstatus = 3;
-                            } else if(recvstatus == 3) {
-                                if(recvpos < len){
-                                    recvbuf[recvpos] = input1;
-                                    recvsum += input1;
-                                    recvpos++;
-                                } else {
-                                    recvstatus = 4;
-                                    _recvbuf[0] = len;
-                                    recvbuf[len] = input1;
-                                    // procunkcmd(buffer, len + 2, _recvbuf, "recv: ");
-                                    recvsum += input1;
-                                    if(recvsum == 0) {
-                                        iap_proc_msg(recvbuf, recvlen, uart_app_cb_write, NULL);
-                                    }
-                                    recvstatus = -1;
-                                }
+                        uint8_t input1 = data[i];
+                        if(recvstatus == -1) {
+                            recvstatus = 0;
+                            recvpos = 0;
+                            recvlen = 0;
+                            recvsum = 0;
+                        }
+                        if(input1 == 0xff && recvstatus == 0) {
+                            recvstatus = 1;
+                        } else if(input1 == 0x55 && recvstatus == 1) {
+                            recvstatus = 2;
+                        } else if(recvstatus == 2) {
+                            recvlen = input1;
+                            recvsum = input1;
+                            recvstatus = 3;
+                            ESP_LOGI(TAG, "len: %d", input1);
+                        } else if(recvstatus == 3) {
+                            if(recvpos < recvlen){
+                                recvbuf[recvpos] = input1;
+                                recvsum += input1;
+                                recvpos++;
                             } else {
+                                recvstatus = 4;
+                                _recvbuf[0] = recvlen;
+                                recvbuf[recvlen] = input1;
+                                // procunkcmd(buffer, len + 2, _recvbuf, "recv: ");
+                                recvsum += input1;
+                                if(recvsum == 0) {
+                                    iap_proc_msg((uint8_t*)recvbuf, recvlen, uart_app_cb_write, NULL);
+                                } else {
+                                    ESP_LOGI(TAG, "chksumdiff: %d", recvsum);
+                                    ESP_LOG_BUFFER_HEX(TAG, recvbuf, recvlen);// ESP_LOG_INFO
+                                }
                                 recvstatus = -1;
                             }
+                        } else {
+                            recvstatus = -1;
                         }
                     }
 
@@ -142,7 +146,7 @@ void uart_app_start() {
     uart_set_pin(uart_num, UART_APP_TXD, UART_APP_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     //Install UART driver, and get the queue.
     uart_driver_install(uart_num, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart0_queue, 0);
-    xTaskCreate(uart_task_handler, "UartT", 2048, NULL, configMAX_PRIORITIES - 2, &uart_task_handle);
+    xTaskCreate(uart_task_handler, "UartT", 4096, NULL, configMAX_PRIORITIES - 2, &uart_task_handle);
 }
 
 void uart_app_stop() {
@@ -152,9 +156,9 @@ void uart_app_stop() {
     }
 }
 
-void uart_app_write(const char *buf, uint32_t len) {
+void uart_app_write(const uint8_t *buf, uint32_t len) {
     while(len > 0) {
-        int ret = uart_write_bytes(uart_num, (const char*)buf, len);
+        int ret = uart_write_bytes(uart_num, (const char *)buf, len);
         len -= ret;
     }
 }

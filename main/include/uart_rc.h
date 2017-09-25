@@ -7,7 +7,7 @@ void uart_app_start();
 
 void uart_app_stop();
 
-void uart_app_write(const char *buf, uint32_t len);
+void uart_app_write(const uint8_t *buf, uint32_t len);
 void uart_update_status(uint8_t status);
 
 enum {

@@ -85,14 +85,14 @@ static void procunkcmd(const uint16_t len,
 void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
 	uint8_t sendbuf[20] = {0xff, 0x55, 0x00, 0x04, 0x00, 0x27};
 	if (status == PC_SEEK) {
-		if (iap_event_mask | SCM_TRACK_INDEX_MS) {
+		if (iap_event_mask & SCM_TRACK_INDEX_MS) {
 			uint32_t playtime = play_get_time();
 			sendbuf[6] = SCI_TRACK_INDEX_MS;
 			ul2uc(playtime, sendbuf + 7);
 			calcsum(sendbuf, 8);
 			cb(sendbuf, 12, cb_param);
 			return;
-		} else if (iap_event_mask | SCM_TRACK_INDEX_S) {
+		} else if (iap_event_mask & SCM_TRACK_INDEX_S) {
 			uint32_t playtime = play_get_time() / 1000;
 			sendbuf[6] = SCI_TRACK_INDEX_MS;
 			ul2uc(playtime, sendbuf + 7);
@@ -100,7 +100,7 @@ void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
 			cb(sendbuf, 12, cb_param);
 			return;
 		}
-	} else if (iap_event_mask | SCM_EXT) {
+	} else if (iap_event_mask & SCM_EXT) {
 		sendbuf[6] = SCI_EXT;
 		switch (status) {
 		case PC_PLAY:
@@ -142,7 +142,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 		retdata_buf0013[] = {0x00, 0x27, 0x00},
 		retdata_d0027[] = {1, 0, 0, 0, 1};
 	uint16_t retlen;
-	uint8_t len;
+	uint8_t len = 0;
 	uint8_t data[140] = {0xff, 0x55};
 	uint8_t * const sendbuf = data + 3;
 
@@ -196,7 +196,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				sendbuf[3] = 0x13;
 				len = headersize + 2;
 				calcsum(data, len);
-				cb(data, len + 2, cb_param);
+				cb(data, len + 4, cb_param);
 
 				sendbuf[0] = 0;
 				sendbuf[1] = 0x27;
@@ -240,11 +240,11 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
 				break;
-			case 0x02:  // Get current playing info
+			case 0x02:  // Get current playing chapter info
 				len = headersize;
 				WRITERET(R(_0101),rbuf, len);
 				break;
-			case 0x05: // Get current play status
+			case 0x05: // Get current play chapter status
 				len = headersize;
 				WRITERET(R(_02),rbuf, len);
 				break;
@@ -265,10 +265,6 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				len = headersize;
 				WRITERET(R(_03),rbuf, len);
 				break;
-			case 0x1C: // Get PlayStatus
-				len = headersize;
-				WRITERET(R(_041C),rbuf, len);
-				break;
 			case 0x1E: // Get current playing track index
 				len = headersize;
 				WRITERET(R(_01),rbuf, len);
@@ -277,43 +273,63 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				len = headersize;
 				WRITERET(R(_03),rbuf, len);
 				break;
-			case 0x1A: // Retrieve categorized db records
-				{
-					uint32_t id_s, id_e;
-					id_e = uc2ul(recv + 7);
-					if(id_e == 0xffffffff) {
-						id_s = 0;
-						id_e = 4;
-					} else {
-						id_s = uc2ul(recv + 3);
-						id_e = id_s + id_e;
-						if(id_s > 3)id_s = 3;
-						if(id_e > 4)id_e = 4;
-					}
-					memcpy(rbuf+4, R(_str), RL(_str));
-					len = headersize;
-					len += RL(_str) + 4;
-					while(id_s < id_e) {
-						rbuf[0] = id_s >> 24;
-						rbuf[1] = id_s >> 16;
-						rbuf[2] = id_s >> 8;
-						rbuf[3] = id_s;
-						calcsum(data, len);
-						cb(data, len, cb_param);
-						id_s ++;
-					}
-					return 0;
+			case 0x1A: { // Retrieve categorized db records
+				uint32_t id_s, id_e;
+				id_e = uc2ul(recv + 7);
+				if(id_e == 0xffffffff) {
+					id_s = 0;
+					id_e = 4;
+				} else {
+					id_s = uc2ul(recv + 3);
+					id_e = id_s + id_e;
+					if(id_s > 3)id_s = 3;
+					if(id_e > 4)id_e = 4;
 				}
+				memcpy(rbuf+4, R(_str), RL(_str));
+				len = headersize;
+				len += RL(_str) + 4;
+				while(id_s < id_e) {
+					ul2uc(id_s, rbuf);
+					calcsum(data, len);
+					cb(data, len + 4, cb_param);
+					id_s ++;
+				}
+				return 0;
+			}
+			case 0x1C: {// Get PlayStatus
+				len = headersize + 9;
+				uint32_t playtime = play_get_time();
+				uint32_t totaltime;
+				totaltime = ((playtime / 300000) + 1) * 300000;
+				ul2uc(totaltime, rbuf);
+				ul2uc(playtime, rbuf + 4);
+				switch(play_status()) {
+				case PC_STOP:
+					rbuf[8] = 0x00;
+					break;
+				case PC_PLAY:
+					rbuf[8] = 0x01;
+					break;
+				case PC_PAUSE:
+					rbuf[8] = 0x02;
+					break;
+				default:
+					rbuf[8] = 0x00;
+					break;
+				}
+				break;
+			}
 			case 0x26: // Set PlayStatusChange notification
-				if(datalen < 4) {
+				if(datalen > 4) {
+					iap_event_mask = uc2ul(recv + 3);
+				} else {
 					if(recv[3] == 0) {
 						iap_event_mask = 0x0000;
 					} else {
 						iap_event_mask = 0x002d;
 					}
-				} else {
-					iap_event_mask = uc2ul(recv + 3);
 				}
+				break;
 			case 0x29: // Play control
 				switch(recv[3]) {
 					case 0x01:
@@ -351,7 +367,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				sendbuf[2] = 1;
 
 				calcsum(data, len);
-				cb(data, len, cb_param);
+				cb(data, len + 4, cb_param);
 
 				sendbuf[2] = 0x27;
 				len = headersize;
@@ -378,7 +394,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
 				calcsum(data, len);
-				cb(data, len, cb_param);
+				cb(data, len + 4, cb_param);
 
 				sendbuf[2] = 0x27;
 				len = headersize;
@@ -399,7 +415,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 
 	if(len > 0) {
 		calcsum(data, len);
-		cb(data, len, cb_param);
+		cb(data, len + 4, cb_param);
 	}
 	return retlen;
 }

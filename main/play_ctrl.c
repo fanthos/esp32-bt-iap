@@ -6,6 +6,13 @@ static uint8_t m_play_status = PC_STOP;
 static uint32_t m_play_ticks = 0;
 
 void play_control(uint8_t ctrl) {
+    if(ctrl == PC_TOGGLE) {
+        if(m_play_status == PC_PLAY) {
+            ctrl = PC_PAUSE;
+        } else {
+            ctrl = PC_PLAY;
+        }
+    }
     bt_app_rc_ctrl(ctrl);
 }
 

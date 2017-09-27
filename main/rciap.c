@@ -10,6 +10,7 @@
 #define RL(x) sizeof(retdata ## x)
 
 uint8_t playstatus = 0;
+uint32_t playtimelast = 0;
 
 uint16_t STATUS_PUSH = 0x0001;
 
@@ -87,6 +88,10 @@ void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
 	if (status == PC_SEEK) {
 		if (iap_event_mask & SCM_TRACK_INDEX_MS) {
 			uint32_t playtime = play_get_time();
+			if(playtime == playtimelast) {
+				return;
+			}
+			playtimelast = playtime;
 			sendbuf[6] = SCI_TRACK_INDEX_MS;
 			ul2uc(playtime, sendbuf + 7);
 			calcsum(sendbuf, 8);
@@ -94,8 +99,21 @@ void iap_event_notify(uint8_t status, iap_callback_t cb, void *cb_param) {
 			return;
 		} else if (iap_event_mask & SCM_TRACK_INDEX_S) {
 			uint32_t playtime = play_get_time() / 1000;
+			if(playtime == playtimelast) {
+				return;
+			}
+			playtimelast = playtime;
 			sendbuf[6] = SCI_TRACK_INDEX_MS;
 			ul2uc(playtime, sendbuf + 7);
+			calcsum(sendbuf, 8);
+			cb(sendbuf, 12, cb_param);
+			return;
+		}
+	} else if (status == PC_TRACK) {
+		if (iap_event_mask & SCM_TRACK_INDEX) {
+			uint32_t trackindex = 1;
+			sendbuf[6] = SCI_TRACK_INDEX;
+			ul2uc(trackindex, sendbuf + 7);
 			calcsum(sendbuf, 8);
 			cb(sendbuf, 12, cb_param);
 			return;
@@ -138,7 +156,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 		retdata_03[] = {0,0,0,3},
 		retdata_0101[] = {0,0,0,1,0,0,0,1},
 		retdata_041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1},
-		retdata_ary0028[] = {1,4,4,4,5,6,7},
+		retdata_ary0028[] = {1,4,4,4,5,6,7,0xff},
 		retdata_buf0013[] = {0x00, 0x27, 0x00},
 		retdata_d0027[] = {1, 0, 0, 0, 1};
 	uint16_t retlen;
@@ -150,12 +168,11 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 		uint8_t *rbuf = sendbuf + 2;
 		sendbuf[0] = 0;
 		sendbuf[1] = recv[1] + 1;
-		len = 0;
 		const uint16_t headersize = 2;
 		switch(recv[1]) {
 			case 0x01: // Identify
 			case 0x02: // !ACK
-				return 0;
+				len = 0;
 			case 0x03: // RequesetRemoteUIMode
 				rbuf[0] = 1;
 				len = headersize + 1;
@@ -205,8 +222,9 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				break;
 			case 0x28: // Device RetAccessoryInfo
 				rbuf[0] = R(_ary0028)[recv[2]];
-				if(rbuf[0] > RL(_ary0028)){
-					return 0;
+				if(rbuf[0] == 0xff){
+					len = 0;
+					break;
 				}
 				len = headersize + 1;
 				sendbuf[1] = 0x27;
@@ -294,7 +312,7 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 					cb(data, len + 4, cb_param);
 					id_s ++;
 				}
-				return 0;
+				len = 0;
 			}
 			case 0x1C: {// Get PlayStatus
 				len = headersize + 9;
@@ -329,6 +347,10 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 						iap_event_mask = 0x002d;
 					}
 				}
+				len = headersize;
+				WRITERET(R(_04ack),rbuf, len);
+				rbuf[2] = 0x26;
+				sendbuf[2] = 1;
 				break;
 			case 0x29: // Play control
 				switch(recv[3]) {
@@ -369,10 +391,9 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				calcsum(data, len);
 				cb(data, len + 4, cb_param);
 
-				sendbuf[2] = 0x27;
-				len = headersize;
-				WRITERET(R(_d0027),rbuf, len);
+				iap_event_notify(PC_TRACK, cb, cb_param);
 
+				len = 0;
 				break;
 			case 0x37: // Set play track
 				switch(recv[6]) {
@@ -395,10 +416,10 @@ uint16_t iap_proc_msg(const uint8_t recv[], const uint16_t datalen,
 				sendbuf[2] = 1;
 				calcsum(data, len);
 				cb(data, len + 4, cb_param);
+				
+				iap_event_notify(PC_TRACK, cb, cb_param);
 
-				sendbuf[2] = 0x27;
-				len = headersize;
-				WRITERET(R(_d0027),rbuf, len);
+				len = 0;
 				break;
 			default:
 				len = headersize;

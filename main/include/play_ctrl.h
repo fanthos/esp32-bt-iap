@@ -4,14 +4,15 @@
 #include <stdint.h>
 
 enum PLAY_CONTROL{
-    PC_SEEK = 0x7f,
     PC_NONE = 0,
     PC_STOP = 1,
     PC_PLAY,
     PC_PAUSE,
     PC_NEXT,
     PC_PREV,
-    PC_TOGGLE
+    PC_TOGGLE,
+    PC_SEEK = 0x40,
+    PC_TRACK
 };
 
 void play_control(uint8_t ctrl);

@@ -22,6 +22,9 @@ static void uart_app_evt(uint16_t evt, void *param) {
 }
 
 int uart_app_cb_write(const uint8_t *data, const int32_t len, void *params) {
+    vTaskDelay(5);
+    ESP_LOGI(TAG, ">> %d", len);
+    ESP_LOG_BUFFER_HEX(TAG, data, len);// ESP_LOG_INFO
     uart_app_write(data, len);
     return 0;
 }
@@ -48,7 +51,6 @@ static void uart_task_handler(void *arg) {
 		// lastrun = newrun;
         //Waiting for UART event.
         if(xQueueReceive(uart0_queue, (void * )&event, (portTickType)UART_APP_RX_WAIT_TIME)) {
-            ESP_LOGI(TAG, "uart[%d] event:", uart_num);
             switch(event.type) {
                 //Event of UART receving data
                 /*We'd better handler data event fast, there would be much more data events than
@@ -56,8 +58,10 @@ static void uart_task_handler(void *arg) {
                 be full.
                 in this example, we don't process data in event, but read data outside.*/
                 case UART_DATA: {
-                    int len = uart_read_bytes(uart_num, (uint8_t *)data, BUF_SIZE, 100 / portTICK_RATE_MS);
-                    ESP_LOGI(TAG, "recv: %d, msgsize: %d", len, event.size);
+                    int len = uart_read_bytes(uart_num, (uint8_t *)data, BUF_SIZE, 100 / portTICK_RATE_MS); 
+                    if(len > 0) {
+                        ESP_LOGI(TAG, "<< %d, msgsize: %d", len, event.size);
+                    }
                     // ESP_LOG_BUFFER_HEX(TAG, data, len);// ESP_LOG_INFO
                     for(int i = 0; i < len; i++) {
                         uint8_t input1 = data[i];
@@ -75,7 +79,6 @@ static void uart_task_handler(void *arg) {
                             recvlen = input1;
                             recvsum = input1;
                             recvstatus = 3;
-                            ESP_LOGI(TAG, "len: %d", input1);
                         } else if(recvstatus == 3) {
                             if(recvpos < recvlen){
                                 recvbuf[recvpos] = input1;
@@ -88,9 +91,11 @@ static void uart_task_handler(void *arg) {
                                 // procunkcmd(buffer, len + 2, _recvbuf, "recv: ");
                                 recvsum += input1;
                                 if(recvsum == 0) {
+                                    ESP_LOGI(TAG, "<< len: %d", recvlen);
+                                    ESP_LOG_BUFFER_HEX(TAG, recvbuf, recvlen);// ESP_LOG_INFO
                                     iap_proc_msg((uint8_t*)recvbuf, recvlen, uart_app_cb_write, NULL);
                                 } else {
-                                    ESP_LOGI(TAG, "chksumdiff: %d", recvsum);
+                                    ESP_LOGW(TAG, "chksumdiff: %d", recvsum);
                                     ESP_LOG_BUFFER_HEX(TAG, recvbuf, recvlen);// ESP_LOG_INFO
                                 }
                                 recvstatus = -1;
@@ -145,7 +150,7 @@ void uart_app_start() {
     //Set UART1 pins(TX: IO4, RX: I05, RTS: IO18, CTS: IO19)
     uart_set_pin(uart_num, UART_APP_TXD, UART_APP_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     //Install UART driver, and get the queue.
-    uart_driver_install(uart_num, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart0_queue, 0);
+    uart_driver_install(uart_num, BUF_SIZE * 2, 0, 10, &uart0_queue, 0);
     xTaskCreate(uart_task_handler, "UartT", 4096, NULL, configMAX_PRIORITIES - 2, &uart_task_handle);
 }
 
